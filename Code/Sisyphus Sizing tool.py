@@ -55,16 +55,23 @@ class Sun():
 
 
 class Battery(object):
-    def __init__(self, Battery_Energy_Density, Battery_Mass):
-        self.energy_density = Battery_Energy_Density #Mj/kg
-        self.mass = Battery_Mass
-        self.energy_capacity = self.energy_density*self.mass
-    def update(self):
-        self.mass = self.energy_capacity/self.energy_density
+    def __init__(self):
+        '''
+        The Battery is composed of reclaimed 21700s Li-ion cells
+        each cell weights 68 grams and so the mass is stepped in sizes of 68 grams
+        '''
+        self.Cell_mass = 0.068
+        self.Cell_Capacity_mah = 4900 #mah
+        self.Cell_Nominal_voltage = 3.6 #volts
+        self.Cell_Capacity = self.Cell_Nominal_voltage*(self.Cell_Capacity_mah/1000)
+        self.Cell_Count = 1
+        self.Mass = 0
+        self.update(self.Cell_Capacity_mah)
+    def update(self, capacity):
+        self.Cell_Count = np.ceil(capacity/self.Cell_Capacity)
+        self.Energy_Capacity = self.Cell_Capacity*self.Cell_Count
+        self.Mass = self.Cell_mass*self.Cell_Count
 
-    def Set_capacity(self, cap):
-        self.energy_capacity = cap
-        self.update()
 
 class Solar_Cell(object):
     def __init__(self, Cell_Dimensions, Cell_mass, Cell_Efficiency, Normal_Vector = np.array([0,0,-1])):
@@ -122,6 +129,24 @@ class Propulsion_System():
         self.generic_motor = Motor()
         self.generic_esc = ESC()
         self.Prop_efficiecy = 0.7 #Max efficiecy
+class Empennage(object):
+    def __init__(self):
+        self.Leaver_arm_density = 0.03#kg/m, 30 grams per meter
+        self.Empennage_density = 2.31#kg/m^2
+        self.Vertical_Tail_Volume_Coefficient = 0.02
+        self.Horizontal_Tail_Volume_Coefficient = 0.5
+
+    def Solve_emmenage(self, Wing_Area, Wing_Chord, Wing_Span):
+        '''
+        Solves for the lever arm and tail area that minimises
+        the mass of the tail arm and empennage
+        V proud of this cos its a nice little derivative
+        This will cause it to be very senstive to cg changes 
+        '''
+        self.Leaver_Arm_length = np.sqrt((self.Empennage_density*Wing_Area*(self.Vertical_Tail_Volume_Coefficient*Wing_Span+self.Horizontal_Tail_Volume_Coefficient*Wing_Chord))/self.Leaver_arm_density)
+        self.Horizontal_Tail_Area = (self.Vertical_Tail_Volume_Coefficient*Wing_Chord*Wing_Area)/self.Leaver_Arm_length
+        self.Vertical_Tail_Area = (self.Vertical_Tail_Volume_Coefficient*Wing_Span*Wing_Area)/self.Leaver_Arm_length
+        self.Mass = self.Leaver_Arm_length*self.Leaver_arm_density+(self.Horizontal_Tail_Area+self.Vertical_Tail_Area)*self.Empennage_density
 
 class Aircraft(object):
     def __init__(self):
@@ -135,6 +160,10 @@ class Aircraft(object):
         return
     def Compute_Endurance(self):
         self.Enducrance  = self.battery.energy_capacity/self.Cruise_power()
+    def Mass(self):
+        return self.Wing.Mass+self.Batter.Mass+self.propulsion_system.mass
+    def Size(self):
+
 
 class Sensitivity_Analysis():
     '''
@@ -160,6 +189,10 @@ class main():
         self.Sisyphus = Aircraft()
         self.mainloop()
     def mainloop(self):
+        '''Runs the sizing for 10 iterations'''
+        self.Sisyphus.Size(10)
+
+
         self.irradiance_array  = self.sun.Compute_total_irradience()*60*60
         print(self.irradiance_array)
         self.cumulative_irradiace = np.cumsum(self.irradiance_array)
