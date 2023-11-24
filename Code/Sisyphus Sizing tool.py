@@ -52,8 +52,6 @@ class Sun():
     def Panel_Irradience(self):
         return np.array([irradiance_on_plane(Panel_Normal_Vector, self.h, datetime(date[0], date[1], date[2], hour, minute), self.Latitude) for minute in range(0, 60) for hour in range(0, 24)])
 
-
-
 class Battery(object):
     def __init__(self):
         '''
@@ -67,34 +65,49 @@ class Battery(object):
         self.Cell_Count = 1
         self.Mass = 0
         self.update(self.Cell_Capacity_mah)
-    def update(self, capacity):
+    def Update(self, capacity):
         self.Cell_Count = np.ceil(capacity/self.Cell_Capacity)
         self.Energy_Capacity = self.Cell_Capacity*self.Cell_Count
         self.Mass = self.Cell_mass*self.Cell_Count
 
-
-class Solar_Cell(object):
+class Solar_Array(object):
     def __init__(self, Cell_Dimensions, Cell_mass, Cell_Efficiency, Normal_Vector = np.array([0,0,-1])):
         self.sun = Sun(self.Latitude, self.Longditude, )#Yes this is horribly memory inefficent, do i care, Yes. do I care to fix it No
         self.vnorm = Normal_Vector
         self.Dimensions = Cell_Dimensions
         self.mass = Cell_mass
         self.Cell_Efficiency = Cell_Efficiency
+    def Update(self):
 
-
-class Power_Model():
-    def __init__(self):
-        pass
 
 class Wing():
-    def __init__(self):
+    def __init__(self, wing_density= 2.31, chord = 0.3, span = 6, efficiency = 0.7, lift_curve_slope, operating_cl):
         self.Wing_Density = 2.31#kg/m^2
-        self.Chord = 0.3
+        self.Aspect_Ratio = 25
         self.Span = 6
+        self.Chord = self.Span/self.Aspect_Ratio
         self.Efficiency = 0.7 #This is assumed constant
         self.Lift_Curve_Slope = 2*np.pi #Assumed Constant
-    def Lift_Required(self):
+        self.Operating_Cl = 0.98 #Weirdly high but the maths dont lie, except when it does
+        self.Operating_LD_Ratio = 50
+        self.Mass = 0
     def Drag_induced(self):
+        pass
+    def Thrust_Required(self,velocity, desnity):
+        return (1/2)*desnity*self.Wing_Area*(self.Operating_Cl/self.Operating_LD_Ratio)*velocity**2
+    def Update(self, velocity, density, aircraft_mass, Required_Solar_Area):
+        '''
+        The Wing either needs to be big enought to fit enought solar panels, or be big enought to maintain flight whichever is bigger
+        '''
+        self.Lift_Limited_Area = (2*aircraft_mass)/(Operating_Cl*density*velocity**2)
+        self.Solar_Limited_Area = Required_Solar_Area
+        if self.Solar_Limited_Area>self.Lift_Limited_Area:
+            self.Mass = self.Solar_Limited_Area*self.Wing_Density
+            self.Wing_Area = self.Solar_Limited_Area
+        else:
+            self.Mass = self.Lift_Limited_Area*self.Wing_Density
+            self.Wing_Area = self.Lift_Limited_Area
+        self.Span = np.sqrt(self.Wing_Area*self.Aspect_Ratio)
 
 
 class Motor(object):
@@ -104,12 +117,9 @@ class Motor(object):
         should run
         '''
         self.Motor_Efficiency = 0.8 # This should be a function
-        self.mass = 0.1
-    def Update_Mass(self, OPR):
-        self.mass = (-2e-05)*(OPR**2)+(0.0585*OPR)+81.682 #This is an Empircical Relashonship
-    def Power_Required(self):
-
-
+        self.Mass = 0.1
+    def Update(self, OPR):
+        self.Mass = (-2e-05)*((OPR/self.Motor_Efficiency)**2)+(0.0585*(OPR/self.Motor_Efficiency))+81.682 #This is an Empircical Relashonship
 
 class ESC():
     def __init__(self):
@@ -118,17 +128,31 @@ class ESC():
         this maximises Efficiency
         '''
         self.ESC_Efficiency = 0.97
-        self.mass = 0.200
+        self.Mass = 0.200
     def Update_Mass(self, OPR):
-        self.mass = (-2e-06)*(OPR**2)+(0.0308*OPR)+12.61 #This is an Empircical Relashonship
+        self.Mass = (-2e-06)*((OPR/self.ESC_Efficiency)**2)+(0.0308*(OPR/self.ESC_Efficiency))+12.61 #This is an Empircical Relashonship
+
 class Cargo():
-    def __init__(self):
-        self.Mass = 0.5#kg of cargo
+    def __init__(self, mass = 0.5):
+        self.Mass = mass#kg of cargo
+
 class Propulsion_System():
     def __init__(self):
         self.generic_motor = Motor()
         self.generic_esc = ESC()
+        self.battery = Battery()
+        self.solar_array =
         self.Prop_efficiecy = 0.7 #Max efficiecy
+        self.Mass = 0
+    def Update(self,Thrust_Required, Velocity):
+        self.Work_Rate = Thrust_Required*Velocity
+        self.Total_Work = self.Work_Rate*(24*60*60) #The amount of energy expended everyday keeping the aircraft aloft
+        self.Total_Work_Storage = self.Total_Work/0.8 #The amount we want to have stored to account fo bad weather
+        self.battery.Update(self.Total_Work_Storage)
+        self.generic_motor.Update(self.Work_Rate/0.7)
+        self.generic_esc.Update(self.Work_Rate/0.7)
+        self.Mass = self.generic_esc.Mass + self.generic_motor.Mass + self.battery.Mass +
+
 class Empennage(object):
     def __init__(self):
         self.Leaver_arm_density = 0.03#kg/m, 30 grams per meter
@@ -141,7 +165,7 @@ class Empennage(object):
         Solves for the lever arm and tail area that minimises
         the mass of the tail arm and empennage
         V proud of this cos its a nice little derivative
-        This will cause it to be very senstive to cg changes 
+        This will cause it to be very senstive to cg changes
         '''
         self.Leaver_Arm_length = np.sqrt((self.Empennage_density*Wing_Area*(self.Vertical_Tail_Volume_Coefficient*Wing_Span+self.Horizontal_Tail_Volume_Coefficient*Wing_Chord))/self.Leaver_arm_density)
         self.Horizontal_Tail_Area = (self.Vertical_Tail_Volume_Coefficient*Wing_Chord*Wing_Area)/self.Leaver_Arm_length
@@ -152,17 +176,22 @@ class Aircraft(object):
     def __init__(self):
         self.main_wing = Wing()
         self.battery = Battery()
+        self.cargo = Cargo(0.5)
         self.propulsion_system = Propulsion_System()
+        self.empennage = Empennage()
         self.Solar_Array = [for _ in range(0,)]
         self.Cruise_Speed = 15# needed to overcome likey weather in Llanbedr
-    def Cruise_power(self):
-        self.Drag = (1/2)1.225*
-        return
     def Compute_Endurance(self):
         self.Enducrance  = self.battery.energy_capacity/self.Cruise_power()
     def Mass(self):
         return self.Wing.Mass+self.Batter.Mass+self.propulsion_system.mass
-    def Size(self):
+    def Size(self, Iterations):
+        '''An inital estimate must be made this will be mega wrong but trust bro this gonna work'''
+        self.Mass = 1 #kg
+        self.main_wing.Update(self.Cruise_Speed, self.Mass, 0.125**2)
+        self.empennage.Solve_emmenage(self.main_wing.Wing_Area, self.main_wing.Chord, self.main_wing.Span)
+        self.propulsion_system.Update(self.main_wing.Thrust_Required(self.Cruise_Speed, 1.225),self.Cruise_Speed)
+        self.Mass = self.main_wing.Mass + self.empennage.mass + self.propulsion_system.mass + self.cargo.mass
 
 
 class Sensitivity_Analysis():
@@ -174,6 +203,7 @@ class Sensitivity_Analysis():
     '''
 
     def __init__(self):
+        pass
 
 
 class main():
